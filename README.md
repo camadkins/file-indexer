@@ -16,7 +16,7 @@ A high-performance Rust CLI tool to recursively index files, extract metadata, c
 
 ```bash
 file_indexer index /some/path --depth 3 --content --checksums
-````
+```
 
 ### Search in indexed files
 

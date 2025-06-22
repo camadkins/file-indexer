@@ -11,6 +11,8 @@ use regex::Regex;
 use rayon::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Metadata for a single file discovered during indexing.
+/// Includes timestamps, permissions and optional checksum and preview.
 pub struct FileRecord {
     pub path: PathBuf,
     pub name: String,
@@ -26,6 +28,7 @@ pub struct FileRecord {
 }
 
 #[derive(Debug, Clone)]
+/// Options controlling how directories are traversed and files are indexed.
 pub struct IndexConfig {
     pub max_depth: Option<usize>,
     pub include_content: bool,
@@ -65,6 +68,7 @@ pub struct IndexStats {
 }
 
 #[derive(Debug, Clone)]
+/// Settings that alter search behavior such as case sensitivity and regex use.
 pub struct QueryOptions {
     pub case_sensitive: bool,
     pub regex: bool,
@@ -84,6 +88,7 @@ impl Default for QueryOptions {
 }
 
 #[derive(Debug)]
+/// A single result from a query containing the record, matched segments and a score.
 pub struct SearchResult {
     pub record: FileRecord,
     pub matches: Vec<Match>,
@@ -91,6 +96,7 @@ pub struct SearchResult {
 }
 
 #[derive(Debug)]
+/// Location information for a term match within a field.
 pub struct Match {
     pub field: String,
     pub text: String,
@@ -98,6 +104,7 @@ pub struct Match {
     pub end: usize,
 }
 
+/// In-memory index that stores file records and provides search and export capabilities.
 pub struct FileIndexer {
     records: Arc<Mutex<Vec<FileRecord>>>,
     checksum_map: Arc<Mutex<HashMap<String, Vec<PathBuf>>>>,
@@ -106,6 +113,7 @@ pub struct FileIndexer {
 }
 
 impl FileIndexer {
+    /// Create a new indexer using the provided configuration.
     pub fn new(config: IndexConfig) -> Self {
         Self {
             records: Arc::new(Mutex::new(Vec::new())),
@@ -121,8 +129,11 @@ impl FileIndexer {
             })),
         }
     }
-
-    pub fn index_directory<P: AsRef<Path>>(&self, root_path: P) -> Result<(), Box<dyn std::error::Error>> {
+    /// Walk the given directory and populate the in-memory index.
+    pub fn index_directory<P: AsRef<Path>>(
+        &self,
+        root_path: P,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let start_time = Instant::now();
         let root_path = root_path.as_ref();
         
@@ -158,7 +169,12 @@ impl FileIndexer {
         Ok(())
     }
     
-    fn collect_file_paths(&self, dir: &Path, depth: usize, file_paths: &mut Vec<PathBuf>) -> io::Result<()> {
+    fn collect_file_paths(
+        &self,
+        dir: &Path,
+        depth: usize,
+        file_paths: &mut Vec<PathBuf>,
+    ) -> io::Result<()> {
         if let Some(max_depth) = self.config.max_depth {
             if depth > max_depth {
                 return Ok(());
@@ -252,7 +268,10 @@ impl FileIndexer {
         Ok(())
     }
     
-    fn create_file_record(path: &Path, metadata: &Metadata) -> Result<FileRecord, Box<dyn std::error::Error>> {
+    fn create_file_record(
+        path: &Path,
+        metadata: &Metadata,
+    ) -> Result<FileRecord, Box<dyn std::error::Error>> {
         let name = path.file_name()
             .unwrap_or_default()
             .to_string_lossy()
@@ -326,7 +345,10 @@ impl FileIndexer {
         Ok(format!("{:x}", hasher.finalize()))
     }
     
-    fn extract_content_preview(path: &Path, max_size: usize) -> Result<String, Box<dyn std::error::Error>> {
+    fn extract_content_preview(
+        path: &Path,
+        max_size: usize,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let mut buffer = vec![0; max_size];
@@ -358,6 +380,7 @@ impl FileIndexer {
         self.stats.lock().unwrap().duplicates_found = duplicates_count;
     }
     
+    /// Execute a search query against the index using the given options.
     pub fn search(&self, query: &str, options: &QueryOptions) -> Vec<SearchResult> {
         let records = self.records.lock().unwrap();
         let query_parser = QueryParser::new(query, options);
@@ -400,6 +423,7 @@ impl FileIndexer {
         score
     }
     
+    /// Write the indexed records to a pretty printed JSON file.
     pub fn export_json<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
         let records = self.records.lock().unwrap();
         let file = File::create(path)?;
@@ -407,6 +431,7 @@ impl FileIndexer {
         Ok(())
     }
     
+    /// Export the index in a simple CSV format.
     pub fn export_csv<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
         let records = self.records.lock().unwrap();
         let mut file = File::create(path)?;
@@ -431,6 +456,7 @@ impl FileIndexer {
         Ok(())
     }
     
+    /// Display summary statistics for the most recent indexing run.
     pub fn print_stats(&self) {
         let stats = self.stats.lock().unwrap();
         println!("\nIndexing Statistics:");
@@ -444,6 +470,7 @@ impl FileIndexer {
                  stats.files_processed as f64 / stats.processing_time.as_secs_f64());
     }
     
+    /// Return groups of files that share the same checksum.
     pub fn get_duplicate_files(&self) -> Vec<(String, Vec<PathBuf>)> {
         let checksum_map = self.checksum_map.lock().unwrap();
         checksum_map.iter()
@@ -600,8 +627,16 @@ impl QueryParser {
     fn find_term_matches(&self, term: &str, text: &str) -> Option<Vec<(usize, usize)>> {
         let mut matches = Vec::new();
         
-        let search_text = if self.options.case_sensitive { text.to_string() } else { text.to_lowercase() };
-        let search_term = if self.options.case_sensitive { term.to_string() } else { term.to_lowercase() };
+        let search_text = if self.options.case_sensitive {
+            text.to_string()
+        } else {
+            text.to_lowercase()
+        };
+        let search_term = if self.options.case_sensitive {
+            term.to_string()
+        } else {
+            term.to_lowercase()
+        };
         
         if self.options.regex {
             if let Ok(regex) = Regex::new(&search_term) {
@@ -769,7 +804,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
-regex = "1.0"
-rayon = "1.7"
-num_cpus = "1.0"
+regex = "1.11"
+rayon = "1.10"
+num_cpus = "1.17"
 */
